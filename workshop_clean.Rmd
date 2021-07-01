@@ -1,0 +1,284 @@
+---
+title: "SW_Workshop"
+author: "Scott Spillias"
+date: "19/11/2020"
+output: pdf_document
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(
+  fig.path = "images/",
+  dev = c('pdf')
+)
+
+library(readxl)
+library(brms)
+library(data.table)
+#library(MASS)
+library(reshape2)
+library(stringr)
+#library(ggwordcloud)
+#library(stylo)
+library(tidytext)
+#library(networkD3)
+library(tidyverse)
+#library(grid)
+#library(gridExtra)
+#library(sjPlot)
+#library(LaCroixColoR)
+library(ggpubr)
+#library(mixor)
+#library(ordinal)
+library(bayesplot)
+library(tidybayes)
+library(modelr)
+library(RColorBrewer)
+library(here)
+library(gt)
+library(webshot)
+webshot::install_phantomjs()
+
+set.seed(11)
+
+SDGpalette <- c("#e4253c", "#dea73a", "#4c9f45", "#c5202e", "#f0412b", "#29bef2", "#fac315", "#a21c44", "#f26a2c", "#dd1768", "#f99d27", "#be8b2c", "#417f45", "#1c97d3", "#5dbb47", "#06699e", "#18486b", '#99cccc','#669999','#336666')
+```
+
+
+```{r Import Data,echo=T, results='hide', warning=FALSE, message=FALSE}
+
+read_excel_allsheets <- function(filename, tibble = FALSE) {
+     sheets <- readxl::excel_sheets(filename)
+    x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+    if(!tibble) x <- lapply(x, as.data.frame)
+    names(x) <- sheets
+    x
+}
+mysheets <- read_excel_allsheets("Summary Data - Seaweed Workshop.xlsx")
+dat <- mysheets[["Summary"]][c(1:4),c(1:4)]
+names(dat) <- c("...1", "Academia", "Industry", "Government")
+
+```
+
+```{r Create Main Data Frame}
+df <- rbindlist(mysheets[c("SW Acad.","OT Acad.","SW Prac.","OT Prac.","SW Gov.","OT Gov.")], fill = TRUE)
+df <- merge(df, mysheets[["SDG_Links"]], by = c("Pathway", "Group", "SWOT")) %>%
+  arrange(desc(IQ_Range)) %>% arrange(desc(Median)) %>% 
+  arrange(Median) %>% 
+  mutate(Environment = replace_na(Environment, 0),
+         Society = replace_na(Society, 0),
+         Economy = replace_na(Economy, 0),
+         ID = rev(seq(1:nrow(.))))
+
+df_themes <- mysheets[["Theme_Analysis"]] %>% 
+  select(-'...1') %>% 
+  filter(!is.na(Group)) %>% 
+  pivot_longer(names_to = "subThemes", -c(Group, SWOT, Pathway)) %>% 
+  drop_na(value) %>% 
+  select(-value)
+umbrella <- mysheets[["Theme_Sum"]] %>% 
+  select(Themes, subThemes) %>% 
+  drop_na()
+df_themes <- merge(df_themes, umbrella, by = "subThemes")
+
+
+```
+
+```{r Wrangle Data}
+df_2 <- df %>% 
+        dplyr::select(-c(Rank_Mean, Rank_SD, Theme_1, Theme_2, Detailed_Theme, Au_1, Au_2, Au_3, UR1, UR2, UR3, UR4, UR5, UR6, Theme, Environment, Economy, Society)) %>%
+        pivot_longer(names_to = "individual", values_to = "score", -c(ID, Pathway, Group, SWOT, Median, IQ_Range, Polarity)) %>% 
+        drop_na(score) %>% 
+        # select(-Field) %>% 
+        mutate(score = factor(score)) %>% 
+        mutate(adj_score = case_when(score %in% c(1,2) ~ 1,
+                                     score %in% c(3:5) ~ 2,
+                                     score %in% c(6,7) ~ 3)) %>% 
+        mutate(adj_score = factor(adj_score, ordered = TRUE)) %>% 
+  left_join(df_themes, by = c("Pathway", "Group", "SWOT"))
+
+sdf <- mysheets[["SDG_Links"]] %>% 
+  select(c(Pathway, Polarity, UR1, UR2, UR3, UR4, UR5, UR6)) %>% 
+  pivot_longer(values_to = "SDG", -c("Pathway", "Polarity")) %>% 
+  filter(!is.na(SDG)) %>% 
+  select(-name)
+
+df_2 <- merge(df_2,sdf, by = c("Pathway","Polarity"))
+
+df_2$Polarity <- recode(df_2$Polarity, "Mixed" = "Uncertain",
+                       "Good" = "Positive",
+                       "Bad" = "Negative")
+df_2$Polarity <- factor(df_2$Polarity, levels = c("Positive", "Uncertain", "Negative"))
+
+df_2 <- df_2 %>% 
+  mutate(score = as.numeric(score),
+           ID = as.factor(ID),
+           Workshop = case_when(SWOT %in% c("S","W") ~ "S/W",
+                                     SWOT %in% c("O","T") ~ "O/T"))
+df_2$Workshop <- factor(df_2$Workshop, levels = c("S/W", "O/T"))
+df_2$Group <- factor(df_2$Group, levels = c("Academia", "Practitioners", "Government"))
+
+pub_table <- df_2 %>% 
+  select(Themes, subThemes, Group, SWOT, Polarity, Pathway) %>% 
+  group_by(Themes,subThemes, Polarity) %>% 
+  summarize(count = n_distinct(Pathway)) %>% 
+  pivot_wider(names_from =  Polarity, values_from = count)
+
+pub_table <- merge(pub_table, df_2 %>% select(Pathway, subThemes, Group) %>% distinct(), by = "subThemes") %>%arrange(Themes, subThemes) 
+
+write.csv(pub_table, "pub_table.csv")
+write.csv(df_2, "df_2.csv")
+df_table <- df_2 %>% select(Pathway, Polarity,Themes,subThemes,SDG) %>% 
+ distinct()
+write.csv(df_table, "df_table.csv")
+pub_table <- read_excel("pub_table_summaries.xlsx")
+
+```
+
+
+```{r Fit bayesian models}
+## Jonah Gabry visualizing Bayesian workflow
+try2 <- function(code, silent = FALSE) {
+     tryCatch(code, error = function(c) {
+         if (!silent) {NULL}
+         else{code}})}
+num_iter = 4000 
+if(is.null(try2(readRDS("models.RDS")))) {
+  
+df_obs_1 <<- df_2 %>% filter(SDG != "E") %>% select(SDG,individual, Group, Workshop, adj_score) %>%  distinct()
+
+df_obs_2 <<- df_2 %>% filter(SDG == "E") %>% select(subThemes,individual, Group, Workshop, adj_score) %>%  distinct()
+  
+df_obs_3 <<- df_2 %>% select(Themes,individual, Group, Workshop, adj_score) %>%  distinct()
+    
+
+model_SDG_aS <- brm(
+  formula = adj_score ~ SDG + (1|Group) + (1|Workshop),
+  data = df_obs_1,
+   family = cumulative("logit"),
+  control = list(adapt_delta = .9999999, 
+                 max_treedepth = 12),
+  cores = 4, 
+  iter = num_iter, 
+  chains = 4)
+
+# model_T_aS <- brm(
+#   formula = adj_score ~ Themes + (1|Group) + (1|Workshop),
+#   data = df_2 %>% filter(SDG != "E") %>% select(Themes,individual, Group, Workshop, adj_score) %>%  distinct(),
+#    family = cumulative("logit"),
+#   control = list(adapt_delta = .9999, 
+#                  max_treedepth = 12),
+#   cores = 4, 
+#   iter = 2000, 
+#   chains = 4)
+
+# model_sT_aS <- brm(
+#   formula = adj_score ~ subThemes + (1|Group) + (1|Workshop),
+#   data = df_2 %>% filter(SDG != "E") %>% select(subThemes,individual, Group, Workshop, adj_score) %>%  distinct(),
+#    family = cumulative("logit"),
+#   control = list(adapt_delta = .9999,
+#                  max_treedepth = 12),
+#   cores = 4,
+#   iter = 2000,
+#   chains = 4)
+
+
+# model_ET_aS <- brm(
+#   formula = adj_score ~ Themes + (1|Group) + (1|Workshop),
+#   data = df_2 %>% filter(SDG == "E") %>% select(Themes,individual, Group, Workshop, adj_score) %>%  distinct(),
+#    family = cumulative("logit"),
+#   control = list(adapt_delta = .99999, 
+#                  max_treedepth = 12),
+#   cores = 4, 
+#   iter = 2000, 
+#   chains = 4)
+
+model_EsT_aS <- brm(
+  formula = adj_score ~ subThemes + (1|Group) + (1|Workshop),
+  data = df_obs_2,
+   family = cumulative("logit"),
+  control = list(adapt_delta = .99999, 
+                 max_treedepth = 12),
+  cores = 4, 
+  iter = num_iter, 
+  chains = 4)
+
+model_ALLT_aS <- brm(
+  formula = adj_score ~ Themes + (1|Group) + (1|Workshop),
+  data = df_obs_3,
+  family = cumulative("logit"),
+  control = list(adapt_delta = .999999, 
+                 max_treedepth = 12),
+  cores = 4, 
+  iter = num_iter, 
+  chains = 4)
+
+models <- list(#model_sT_aS,
+               model_SDG_aS,
+               # model_T_aS,
+               # model_ET_aS,
+               model_EsT_aS, 
+               model_ALLT_aS)
+
+obs_1 <<- df_2 %>% filter(SDG != "E") %>% select(SDG,individual, Group, Workshop, adj_score) %>%  distinct() %>% pull(adj_score) %>% as.numeric()
+
+obs_2 <<- df_2 %>% filter(SDG == "E") %>% select(subThemes,individual, Group, Workshop, adj_score) %>%  distinct() %>% pull(adj_score) %>% as.numeric()
+
+obs_3 <<- df_2 %>% select(Themes,individual, Group, Workshop, adj_score) %>%  distinct() %>%  pull(adj_score) %>% as.numeric()
+  
+  
+saveRDS(models,"models.RDS")} else {
+  models <<- readRDS("models.RDS")
+  }
+```
+
+```{r Create Predictions from Best model fit}
+
+df_main <- df_2 %>% select(Themes, SDG, subThemes, Polarity, Pathway)
+
+new_data <- list()
+for (i in 1:length(models)) {
+## Create Empty New Data
+  new_names = names(models[[i]]$data)[2:4]
+new_data[[i]] = expand_grid(unique(models[[i]]$data[[2]]),
+                      unique(models[[i]]$data$Group),
+                      unique(models[[i]]$data$Workshop)) %>% 
+  setnames(new_names) %>% 
+  add_fitted_draws(models[[i]]) %>%
+    median_qi(.value) %>%
+  mutate(score = levels(models[[i]]$data[[1]])[.category]) %>%
+  group_by(across(1:2), .category) %>% 
+  summarize(.value = mean(.value),
+            .lower = mean(.lower),
+            .upper = mean(.upper)) %>% 
+    ungroup() %>% 
+  filter(.category == "3") 
+new_data[[i]] <- bind_rows(new_data[[i]],
+             new_data[[i]] %>% 
+  group_by(across(1), .category) %>% 
+   summarize(.value = mean(.value),
+            .lower = mean(.lower),
+            .upper = mean(.upper)) %>% 
+    ungroup() %>% 
+  mutate(Group = "All") %>% 
+  relocate(Group)
+            ) %>% 
+  mutate(Group = factor(Group, levels = c("Academia", "Government", "Practitioners","All"))) 
+}
+
+yrep_1 <- posterior_predict(models[[1]], draws = 500)
+yrep_2 <- posterior_predict(models[[2]], draws = 500)
+yrep_3 <- posterior_predict(models[[3]], draws = 500)
+
+```
+
+```{r Inspect diagnostic plots}
+launch_shinystan(models[[1]])
+launch_shinystan(models[[2]])
+launch_shinystan(models[[3]])
+```
+
+```{r}
+source("plots.R")
+source("tables.R")
+```
+
