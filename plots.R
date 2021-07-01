@@ -31,7 +31,8 @@ f.plot <- function(i){
                  x = -as.numeric(n)*max(new_data[[i]]$.upper)/max(num_obs$total), 
                  fill = Polarity), 
              stat = 'identity') +
-    scale_fill_manual(values = SDGpalette[18:20], drop = FALSE, breaks = c("Positive", "Uncertain", "Negative")) +
+    scale_fill_manual(values = SDGpalette[18:20], drop = FALSE, 
+                      labels = c("Strengths/Opportunities","Unknown", "Weaknesses/Threats"), breaks = c("Positive", "Uncertain", "Negative")) +
     scale_size_continuous(guide = FALSE) +
     scale_color_manual(values = c(brewer.pal(3, "Dark2"),'black'), breaks = c("Academia", "Practitioners", "Government", 
                                                                               "All")  ) +
@@ -53,3 +54,27 @@ f.plot <- function(i){
 
 for (i in 1:length(models)){
   (f.plot(i) + ggsave(paste0("Figures/output_",i,".png"), dpi=600, device = "png", width = 24, height = 16, units = "cm")  ) }
+
+diag.plot <- function(x) {
+  mcmc_trace(models[[x]]) +
+    theme(plot.title = element_text(size=4)) +
+    ggsave(paste0("Figures/trace_",x,".png"), width = 24, height = 16, units = "cm")}
+lapply(1:3, function(x) {diag.plot(x)})
+
+bayesplot::mcmc_acf(models[[1]])
+acf.plot <- function(x) {
+  mcmc_acf(models[[x]]) +
+    theme(plot.title = element_text(size=4),
+          panel.spacing = unit(0.01, "lines"),
+          strip.text.x = element_text(angle = 90,
+                                      hjust = 0,
+                                      size = 6),
+          axis.text.x = element_blank()) +
+    ggsave(paste0("Figures/acf_",x,".png"), width = 24, height = 16, units = "cm")}
+lapply(1:3, function(x) {acf.plot(x)})
+
+hist.plot <- function(x) {
+  mcmc_hist(models[[x]]) +
+    theme(plot.title = element_text(size=4)) +
+    ggsave(paste0("Figures/hist_",x,".png"), width = 24, height = 16, units = "cm")}
+lapply(1:3, function(x) {hist.plot(x)})

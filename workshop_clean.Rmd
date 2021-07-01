@@ -270,15 +270,16 @@ yrep_2 <- posterior_predict(models[[2]], draws = 500)
 yrep_3 <- posterior_predict(models[[3]], draws = 500)
 
 ```
+```{r Make Figures and Tables}
+source("plots.R")
+source("tables.R")
+```
 
-```{r Inspect diagnostic plots}
+
+```{r Inspect diagnostic plots, eval = FALSE}
 launch_shinystan(models[[1]])
 launch_shinystan(models[[2]])
 launch_shinystan(models[[3]])
 ```
 
-```{r}
-source("plots.R")
-source("tables.R")
-```
 
