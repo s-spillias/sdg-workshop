@@ -141,14 +141,14 @@ try2 <- function(code, silent = FALSE) {
      tryCatch(code, error = function(c) {
          if (!silent) {NULL}
          else{code}})}
-num_iter = 4000 
+num_iter = 2000 
 if(is.null(try2(readRDS("models.RDS")))) {
   
-df_obs_1 <<- df_2 %>% filter(SDG != "E") %>% select(SDG,individual, Group, Workshop, adj_score) %>%  distinct()
+df_obs_1 <<- df_2 %>% filter(SDG != "E") %>% select(SDG,individual, Group, Workshop, adj_score, Pathway) %>%  distinct()
 
-df_obs_2 <<- df_2 %>% filter(SDG == "E") %>% select(subThemes,individual, Group, Workshop, adj_score) %>%  distinct()
+df_obs_2 <<- df_2 %>% filter(SDG == "E") %>% select(subThemes,individual, Group, Workshop, adj_score, Pathway) %>%  distinct()
   
-df_obs_3 <<- df_2 %>% select(Themes,individual, Group, Workshop, adj_score) %>%  distinct()
+df_obs_3 <<- df_2 %>% select(Themes,individual, Group, Workshop, adj_score, Pathway) %>% distinct()
     
 
 model_SDG_aS <- brm(

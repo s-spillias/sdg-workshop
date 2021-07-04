@@ -17,7 +17,10 @@ f.plot <- function(i){
     arrange(n)
   
   ggplot() +
-    geom_pointinterval(data = new_data[[i]] %>% filter(Group %in% if(i<3){"All"}else{c("Academia", "Practitioners", "Government","All")}),
+    geom_pointinterval(data = new_data[[i]] %>% filter(Group %in% #if(i<3){
+                                                         "All"
+                                                       #}else{c("Academia", "Practitioners", "Government","All")}
+                                                       ),
                        aes(x = .value, 
                            y = reorder(get(names(new_data[[i]])[1]),.value), 
                            col = Group, 
@@ -32,18 +35,24 @@ f.plot <- function(i){
                  fill = Polarity), 
              stat = 'identity') +
     scale_fill_manual(values = SDGpalette[18:20], drop = FALSE, 
-                      labels = c("Strengths/Opportunities","Unknown", "Weaknesses/Threats"), breaks = c("Positive", "Uncertain", "Negative")) +
+                      labels = case_when(i == 3 ~ c("Strengths/Opportunities","Unknown", "Weaknesses/Threats"),
+                                         i == 2 ~ c("Opportunities","Unknown", "Threats"),
+                                         i == 1 ~ c("Strengths","Unknown", "Weaknesses"))
+                                         
+     #                 breaks = c("Positive", "Uncertain", "Negative")
+                      ) +
     scale_size_continuous(guide = FALSE) +
     scale_color_manual(values = c(brewer.pal(3, "Dark2"),'black'), breaks = c("Academia", "Practitioners", "Government", 
                                                                               "All")  ) +
     coord_cartesian(expand = FALSE) +
-    guides(col = guide_legend(order = 2),fill = guide_legend(order = 1), alpha = FALSE) +
+    guides(col = FALSE#guide_legend(order = 2)
+             ,fill = guide_legend(order = 1), alpha = FALSE) +
     theme_pubr() +
     theme(legend.position="right",
           plot.title = element_text(hjust = 0.5))+
     scale_x_continuous(breaks = c(-0.6, -0.3, 0, 0.3, 0.6), labels = c("50", "25", "0", "0.3", "0.6" )) +
-    ggtitle(case_when(i == 1 ~ "Strengths and Weaknesses of Seaweed Farming for each Sustainable Development Goal",
-                      i == 2 ~ "Opportunities and Threats to Seaweed Farming in the Australian Context",
+    ggtitle(case_when(i == 1 ~ "",
+                      i == 2 ~ "",
                       i == 3 ~ ""#"Importance of Themes"
                       )) +
     xlab("Frequency of Mentions | Probability of High Importance Rating") +
